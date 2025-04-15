@@ -274,6 +274,7 @@ const getUserProfileTool = {
 };
 class SlackMcpServer {
     constructor() {
+        this.slackClient = null;
         this.slackBotUserId = null; // To store the bot's user ID
         // Initialize the MCP server with metadata and capabilities.
         this.server = new Server({
@@ -293,14 +294,23 @@ class SlackMcpServer {
         }, {
             capabilities: { tools: {} },
         });
+        this.setupToolHandlers();
+        // Global error handling.
+        this.server.onerror = (error) => console.error("[MCP Error]", error);
+        process.on("SIGINT", async () => {
+            await this.server.close();
+            process.exit(0);
+        });
+    }
+    async initializeSlackClient() {
         const botToken = process.env.SLACK_BOT_TOKEN;
         if (!botToken) {
             console.error("SLACK_BOT_TOKEN environment variable not set.");
-            // We allow the server to start so users can see the tools first.
+            return null;
         }
-        this.slackClient = {
+        const slackClient = {
             botHeaders: {
-                Authorization: `Bearer ${botToken || ""}`,
+                Authorization: `Bearer ${botToken}`,
                 "Content-Type": "application/json",
             },
             getChannels: async (limit = 100, cursor) => {
@@ -312,13 +322,13 @@ class SlackMcpServer {
                 });
                 if (cursor)
                     params.append("cursor", cursor);
-                const response = await fetch(`https://slack.com/api/conversations.list?${params}`, { headers: this.slackClient.botHeaders });
+                const response = await fetch(`https://slack.com/api/conversations.list?${params}`, { headers: slackClient.botHeaders });
                 return response.json();
             },
             postMessage: async (channel_id, text) => {
                 const response = await fetch("https://slack.com/api/chat.postMessage", {
                     method: "POST",
-                    headers: this.slackClient.botHeaders,
+                    headers: slackClient.botHeaders,
                     body: JSON.stringify({ channel: channel_id, text }),
                 });
                 return response.json();
@@ -326,7 +336,7 @@ class SlackMcpServer {
             postReply: async (channel_id, thread_ts, text) => {
                 const response = await fetch("https://slack.com/api/chat.postMessage", {
                     method: "POST",
-                    headers: this.slackClient.botHeaders,
+                    headers: slackClient.botHeaders,
                     body: JSON.stringify({ channel: channel_id, thread_ts, text }),
                 });
                 return response.json();
@@ -334,19 +344,19 @@ class SlackMcpServer {
             addReaction: async (channel_id, timestamp, reaction) => {
                 const response = await fetch("https://slack.com/api/reactions.add", {
                     method: "POST",
-                    headers: this.slackClient.botHeaders,
+                    headers: slackClient.botHeaders,
                     body: JSON.stringify({ channel: channel_id, timestamp, name: reaction }),
                 });
                 return response.json();
             },
             getChannelHistory: async (channel_id, limit = 10) => {
                 const params = new URLSearchParams({ channel: channel_id, limit: limit.toString() });
-                const response = await fetch(`https://slack.com/api/conversations.history?${params}`, { headers: this.slackClient.botHeaders });
+                const response = await fetch(`https://slack.com/api/conversations.history?${params}`, { headers: slackClient.botHeaders });
                 return response.json();
             },
             getThreadReplies: async (channel_id, thread_ts) => {
                 const params = new URLSearchParams({ channel: channel_id, ts: thread_ts });
-                const response = await fetch(`https://slack.com/api/conversations.replies?${params}`, { headers: this.slackClient.botHeaders });
+                const response = await fetch(`https://slack.com/api/conversations.replies?${params}`, { headers: slackClient.botHeaders });
                 return response.json();
             },
             getUsers: async (limit = 100, cursor) => {
@@ -356,27 +366,20 @@ class SlackMcpServer {
                 });
                 if (cursor)
                     params.append("cursor", cursor);
-                const response = await fetch(`https://slack.com/api/users.list?${params}`, { headers: this.slackClient.botHeaders });
+                const response = await fetch(`https://slack.com/api/users.list?${params}`, { headers: slackClient.botHeaders });
                 return response.json();
             },
             getUserProfile: async (user_id) => {
                 const params = new URLSearchParams({ user: user_id, include_labels: "true" });
-                const response = await fetch(`https://slack.com/api/users.profile.get?${params}`, { headers: this.slackClient.botHeaders });
+                const response = await fetch(`https://slack.com/api/users.profile.get?${params}`, { headers: slackClient.botHeaders });
                 return response.json();
             },
         };
-        this.setupToolHandlers();
-        // Global error handling.
-        this.server.onerror = (error) => console.error("[MCP Error]", error);
-        process.on("SIGINT", async () => {
-            await this.server.close();
-            process.exit(0);
-        });
-        this.fetchBotUserId().catch(error => {
-            console.error("Error fetching bot user ID:", error);
-        });
+        return slackClient;
     }
     async fetchBotUserId() {
+        if (!this.slackClient)
+            return;
         try {
             const response = await fetch("https://slack.com/api/auth.test", {
                 headers: this.slackClient.botHeaders,
@@ -450,13 +453,10 @@ class SlackMcpServer {
         });
     }
     async handleListChannels(args) {
+        if (!this.slackClient) {
+            return { content: [{ type: "text", text: "Slack client not initialized." }], isError: true };
+        }
         try {
-            if (!process.env.SLACK_BOT_TOKEN) {
-                return { content: [{ type: "text", text: "SLACK_BOT_TOKEN not configured." }], isError: true };
-            }
-            if (!process.env.SLACK_TEAM_ID) {
-                return { content: [{ type: "text", text: "SLACK_TEAM_ID not configured." }], isError: true };
-            }
             const response = await this.slackClient.getChannels(args.limit, args.cursor);
             return { content: [{ type: "text", text: JSON.stringify(response) }] };
         }
@@ -466,10 +466,10 @@ class SlackMcpServer {
         }
     }
     async handlePostMessage(args) {
+        if (!this.slackClient) {
+            return { content: [{ type: "text", text: "Slack client not initialized." }], isError: true };
+        }
         try {
-            if (!process.env.SLACK_BOT_TOKEN) {
-                return { content: [{ type: "text", text: "SLACK_BOT_TOKEN not configured." }], isError: true };
-            }
             let channelId = args.channel_id;
             if (!channelId && args.channel_name) {
                 channelId = await resolveChannelId(this.slackClient, undefined, args.channel_name);
@@ -486,10 +486,10 @@ class SlackMcpServer {
         }
     }
     async handleReplyToThread(args) {
+        if (!this.slackClient) {
+            return { content: [{ type: "text", text: "Slack client not initialized." }], isError: true };
+        }
         try {
-            if (!process.env.SLACK_BOT_TOKEN) {
-                return { content: [{ type: "text", text: "SLACK_BOT_TOKEN not configured." }], isError: true };
-            }
             let channelId = args.channel_id;
             if (!channelId && args.channel_name) {
                 channelId = await resolveChannelId(this.slackClient, undefined, args.channel_name);
@@ -506,10 +506,10 @@ class SlackMcpServer {
         }
     }
     async handleGetChannelHistory(args) {
+        if (!this.slackClient) {
+            return { content: [{ type: "text", text: "Slack client not initialized." }], isError: true };
+        }
         try {
-            if (!process.env.SLACK_BOT_TOKEN) {
-                return { content: [{ type: "text", text: "SLACK_BOT_TOKEN not configured." }], isError: true };
-            }
             let channelId = args.channel_id;
             if (!channelId && args.channel_name) {
                 channelId = await resolveChannelId(this.slackClient, undefined, args.channel_name);
@@ -526,10 +526,10 @@ class SlackMcpServer {
         }
     }
     async handleGetThreadReplies(args) {
+        if (!this.slackClient) {
+            return { content: [{ type: "text", text: "Slack client not initialized." }], isError: true };
+        }
         try {
-            if (!process.env.SLACK_BOT_TOKEN) {
-                return { content: [{ type: "text", text: "SLACK_BOT_TOKEN not configured." }], isError: true };
-            }
             let channelId = args.channel_id;
             if (!channelId && args.channel_name) {
                 channelId = await resolveChannelId(this.slackClient, undefined, args.channel_name);
@@ -546,13 +546,10 @@ class SlackMcpServer {
         }
     }
     async handleGetUsers(args) {
+        if (!this.slackClient) {
+            return { content: [{ type: "text", text: "Slack client not initialized." }], isError: true };
+        }
         try {
-            if (!process.env.SLACK_BOT_TOKEN) {
-                return { content: [{ type: "text", text: "SLACK_BOT_TOKEN not configured." }], isError: true };
-            }
-            if (!process.env.SLACK_TEAM_ID) {
-                return { content: [{ type: "text", text: "SLACK_TEAM_ID not configured." }], isError: true };
-            }
             const response = await this.slackClient.getUsers(args.limit, args.cursor);
             return { content: [{ type: "text", text: JSON.stringify(response) }] };
         }
@@ -562,10 +559,10 @@ class SlackMcpServer {
         }
     }
     async handleGetUserProfile(args) {
+        if (!this.slackClient) {
+            return { content: [{ type: "text", text: "Slack client not initialized." }], isError: true };
+        }
         try {
-            if (!process.env.SLACK_BOT_TOKEN) {
-                return { content: [{ type: "text", text: "SLACK_BOT_TOKEN not configured." }], isError: true };
-            }
             const response = await this.slackClient.getUserProfile(args.user_id);
             return { content: [{ type: "text", text: JSON.stringify(response) }] };
         }
@@ -575,10 +572,10 @@ class SlackMcpServer {
         }
     }
     async handleGetChannelMessages(args) {
+        if (!this.slackClient) {
+            return { content: [{ type: "text", text: "Slack client not initialized." }], isError: true };
+        }
         try {
-            if (!process.env.SLACK_BOT_TOKEN) {
-                return { content: [{ type: "text", text: "SLACK_BOT_TOKEN not configured." }], isError: true };
-            }
             const response = await getChannelMessages(this.slackClient, args);
             return { content: [{ type: "text", text: JSON.stringify(response) }] };
         }
@@ -588,13 +585,16 @@ class SlackMcpServer {
         }
     }
     async handleGetMentions(args) {
-        try {
-            if (!process.env.SLACK_BOT_TOKEN) {
-                return { content: [{ type: "text", text: "SLACK_BOT_TOKEN not configured." }], isError: true };
-            }
+        if (!this.slackClient) {
+            return { content: [{ type: "text", text: "Slack client not initialized." }], isError: true };
+        }
+        if (!this.slackBotUserId) {
+            await this.fetchBotUserId();
             if (!this.slackBotUserId) {
                 return { content: [{ type: "text", text: "Slack Bot User ID not available." }], isError: true };
             }
+        }
+        try {
             const response = await getMentions(this.slackClient, args, this.slackBotUserId);
             return { content: [{ type: "text", text: JSON.stringify(response) }] };
         }
@@ -607,6 +607,12 @@ class SlackMcpServer {
      * Start the MCP server using STDIO transport.
      */
     async run() {
+        this.slackClient = await this.initializeSlackClient();
+        if (!this.slackClient) {
+            console.error("Failed to initialize Slack client. Check environment variables.");
+            return;
+        }
+        await this.fetchBotUserId();
         const transport = new StdioServerTransport();
         await this.server.connect(transport);
         console.error("Slack MCP server running on stdio");
