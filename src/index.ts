@@ -704,20 +704,13 @@ async function main() {
     console.error("Received ListToolsRequest");
     return {
       tools: [
-        // User tools
-        getUsersTool,
-        // User profile tools
-        getUserProfileTool,
-        // Message tools
-        postMessageTool,
-        // Thread tools
-        replyToThreadTool,
-        getThreadRepliesTool,
-        // Channel tools
         listChannelsTool,
+        postMessageTool,
+        replyToThreadTool,
         getChannelHistoryTool,
-        // Reaction tools
-        // addReactionTool,
+        getThreadRepliesTool,
+        getUsersTool,
+        getUserProfileTool,
       ],
     };
   });
