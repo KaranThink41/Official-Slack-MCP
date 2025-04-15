@@ -1,11 +1,12 @@
+
 {
-  "name": "google-workspace-server",
+  "name": "@modelcontextprotocol/slack-server",
   "version": "0.1.0",
   "description": "A Model Context Protocol server",
   "private": true,
   "type": "module",
   "bin": {
-    "google-workspace-server": "./build/index.js"
+    "@modelcontextprotocol/Slack-server": "./build/index.js"
   },
   "files": [
     "build"
@@ -17,10 +18,7 @@
     "inspector": "npx @modelcontextprotocol/inspector build/index.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.0.1",
-    "@types/node-fetch": "^2.6.12",
-    "dotenv": "^16.5.0",
-    "node-fetch": "^2.7.0"
+    "@modelcontextprotocol/sdk": "1.0.1"
   },
   "devDependencies": {
     "@types/node": "^22",

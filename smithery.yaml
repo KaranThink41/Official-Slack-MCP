@@ -1,7 +1,5 @@
 # Smithery configuration file: https://smithery.ai/docs/config#smitheryyaml
 
-build:
-  dockerBuildPath: ../../
 startCommand:
   type: stdio
   configSchema:
@@ -20,4 +18,11 @@ startCommand:
   commandFunction:
     # A function that produces the CLI command to start the MCP on stdio.
     |-
-    (config) => ({ command: 'node', args: ['dist/index.js'], env: { SLACK_BOT_TOKEN: config.slackBotToken, SLACK_TEAM_ID: config.slackTeamId } })
+    (config) => ({ command: 'node', args: ['build/index.js'],
+     env: { 
+     SLACK_BOT_TOKEN: config.slackBotToken, 
+     SLACK_TEAM_ID: config.slackTeamId 
+     } })
+  exampleConfig:
+    slackBotToken: your_bot_token_here
+    slackTeamId: your_team_id_here
