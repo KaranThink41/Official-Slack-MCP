@@ -490,7 +490,7 @@ async function main() {
   console.error("Starting Slack MCP Server...");
   const server = new Server(
     {
-      name: "Slack MCP Server",
+      name: "Official Slack MCP",
       version: "1.0.0",
     },
     {
